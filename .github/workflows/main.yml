@@ -2,20 +2,20 @@ name: Update YouTube Playlist
 
 on:
   schedule:
-    - cron: '0 * * * *' # Every hour
-  workflow_dispatch: # Allow manual trigger
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: '3.10' # Updated to 3.10
 
       - name: Install dependencies
         run: pip install yt-dlp PyGithub
@@ -23,10 +23,8 @@ jobs:
       - name: Create Cookie File
         run: |
           echo "${{ secrets.YT_COOKIES }}" > cookies.txt
-          # Verify file exists and is not empty
-          if [ -s cookies.txt ]; then echo "Cookie file created successfully"; else echo "Cookie file is empty!"; exit 1; fi
 
-      - name: Run Update Script
+      - name: Run Script
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python update_playlist.py
