@@ -2,8 +2,8 @@ name: Update YouTube Playlist
 
 on:
   schedule:
-    - cron: '0 * * * *' # Automatically runs every hour
-  workflow_dispatch: # Allows you to click "Run workflow" manually in GitHub Actions tab
+    - cron: '0 * * * *' # Every hour
+  workflow_dispatch: # Allow manual trigger
 
 jobs:
   build:
@@ -18,8 +18,13 @@ jobs:
           python-version: '3.9'
 
       - name: Install dependencies
+        run: pip install yt-dlp PyGithub
+
+      - name: Create Cookie File
         run: |
-          pip install yt-dlp PyGithub
+          echo "${{ secrets.YT_COOKIES }}" > cookies.txt
+          # Verify file exists and is not empty
+          if [ -s cookies.txt ]; then echo "Cookie file created successfully"; else echo "Cookie file is empty!"; exit 1; fi
 
       - name: Run Update Script
         env:
