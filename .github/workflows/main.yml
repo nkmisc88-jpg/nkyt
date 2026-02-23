@@ -1,0 +1,27 @@
+name: Update YouTube Playlist
+
+on:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour
+  workflow_dispatch: # Allows you to run it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          pip install yt-dlp PyGithub
+
+      - name: Run Script
+        env:
+          GH_TOKEN: ${{ secrets.PLAYLIST_TOKEN }}
+        run: python update_playlist.py
