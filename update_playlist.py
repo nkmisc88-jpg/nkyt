@@ -4,9 +4,8 @@ import datetime
 from github import Github, Auth
 
 # --- CONFIGURATION FROM ENVIRONMENT ---
-# Set these in GitHub Repository Secrets
 GITHUB_TOKEN = os.getenv("GH_TOKEN")
-REPO_NAME = os.getenv("GITHUB_REPOSITORY") # Automatically provided by GitHub
+REPO_NAME = os.getenv("GITHUB_REPOSITORY") 
 INPUT_FILE = "nkyt.txt"       
 OUTPUT_FILE = "playlist.m3u"  
 BRANCH = "main"
@@ -57,6 +56,10 @@ def get_smart_link(video_id):
     return None, None, None, None
 
 def run_update_cycle():
+    if not GITHUB_TOKEN:
+        print("Error: GH_TOKEN not found in environment secrets.")
+        return
+
     print(f"Update started at: {datetime.datetime.now()}")
     
     auth = Auth.Token(GITHUB_TOKEN)
@@ -64,9 +67,13 @@ def run_update_cycle():
     repo = g.get_repo(REPO_NAME)
     
     # Read input file from repo
-    content_file = repo.get_contents(INPUT_FILE, ref=BRANCH)
-    file_data = content_file.decoded_content.decode("utf-8")
-    raw_urls = [line.strip() for line in file_data.split('\n') if line.strip()]
+    try:
+        content_file = repo.get_contents(INPUT_FILE, ref=BRANCH)
+        file_data = content_file.decoded_content.decode("utf-8")
+        raw_urls = [line.strip() for line in file_data.split('\n') if line.strip()]
+    except Exception as e:
+        print(f"Error reading {INPUT_FILE}: {e}")
+        return
 
     m3u_content = "#EXTM3U\n"
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -89,13 +96,17 @@ def run_update_cycle():
     if total_added > 0:
         try:
             try:
+                # Update existing file
                 contents = repo.get_contents(OUTPUT_FILE, ref=BRANCH)
                 repo.update_file(contents.path, "Auto-Update Playlist", m3u_content, contents.sha, branch=BRANCH)
             except:
+                # Create if it doesn't exist
                 repo.create_file(OUTPUT_FILE, "Auto-Update Playlist", m3u_content, branch=BRANCH)
-            print(f"Successfully updated {OUTPUT_FILE}")
+            print(f"Successfully updated {OUTPUT_FILE} with {total_added} streams.")
         except Exception as e:
             print(f"Error uploading to GitHub: {e}")
+    else:
+        print("No active or upcoming streams found.")
 
 if __name__ == "__main__":
     run_update_cycle()
