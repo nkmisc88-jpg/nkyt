@@ -10,7 +10,7 @@ INPUT_FILE = "nkyt.txt"
 OUTPUT_FILE = "playlist.m3u"  
 BRANCH = "main"
 
-# Enhanced config for 2026 YouTube detection
+# Comprehensive config for 2026 YouTube protection
 YDL_OPTS_BASE = {
     'quiet': True,
     'no_warnings': True,
@@ -18,96 +18,90 @@ YDL_OPTS_BASE = {
     'cookiefile': 'cookies.txt',
     'extractor_args': {
         'youtube': {
-            'player_client': ['mweb', 'ios'], # Added iOS client for better live detection
-            'skip': ['dash', 'hls'] # Focus on getting the metadata first
+            'player_client': ['ios', 'mweb'], # iOS client is very effective for Live
+            'skip': ['dash', 'hls'] 
         }
     }
 }
 
-def get_channel_videos(channel_url):
-    found_streams = []
-    # We check the main URL and the /streams suffix
-    urls_to_check = [channel_url.rstrip('/') , channel_url.rstrip('/') + "/streams"]
+def get_channel_live_vids(channel_url):
+    """Checks multiple potential live locations for a channel"""
+    found_ids = set()
+    base_url = channel_url.rstrip('/')
+    # Check Home, /live (direct), and /streams tab
+    targets = [base_url, f"{base_url}/live", f"{base_url}/streams"]
     
-    opts = {**YDL_OPTS_BASE, 'extract_flat': True, 'playlistend': 10}
+    opts = {**YDL_OPTS_BASE, 'extract_flat': True, 'playlistend': 5}
     
     with yt_dlp.YoutubeDL(opts) as ydl:
-        for url in urls_to_check:
+        for target in targets:
             try:
-                result = ydl.extract_info(url, download=False)
+                result = ydl.extract_info(target, download=False)
                 if 'entries' in result:
                     for entry in result['entries']:
-                        if entry.get('id'):
-                            found_streams.append({'id': entry['id'], 'title': entry.get('title', 'Unknown')})
+                        if entry.get('id'): found_ids.add(entry['id'])
+                elif result.get('id'): # Direct match for /live
+                    found_ids.add(result['id'])
             except:
                 continue
-    return found_streams
+    return list(found_ids)
 
-def get_smart_link(video_id):
+def get_live_link(video_id):
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     try:
         with yt_dlp.YoutubeDL(YDL_OPTS_BASE) as ydl:
             info = ydl.extract_info(video_url, download=False)
-            live_status = info.get('live_status')
+            status = info.get('live_status')
             
-            # If the video is live or upcoming
-            if live_status in ['is_live', 'is_upcoming', 'live']:
+            # Only proceed if it is actually Live or Upcoming
+            if status in ['is_live', 'live', 'is_upcoming']:
                 formats = info.get('formats', [])
                 hls = [f for f in formats if 'm3u8' in str(f.get('protocol', ''))]
-                # Sort by resolution to get the best quality
                 if hls:
                     hls.sort(key=lambda x: x.get('height', 0) or 0, reverse=True)
-                    link = hls[0]['url']
-                else:
-                    link = info.get('url')
-                    
-                return ("LIVE" if live_status in ['is_live', 'live'] else "UPCOMING"), link, info.get('uploader'), info.get('title')
+                    return ("LIVE" if status != 'is_upcoming' else "UPCOMING"), hls[0]['url'], info.get('uploader'), info.get('title')
     except:
         pass
     return None, None, None, None
 
-def run_update_cycle():
+def run_update():
     if not GITHUB_TOKEN: return
-    
     g = Github(auth=Auth.Token(GITHUB_TOKEN))
     repo = g.get_repo(REPO_NAME)
     
     try:
-        content_file = repo.get_contents(INPUT_FILE, ref=BRANCH)
-        raw_urls = content_file.decoded_content.decode("utf-8").splitlines()
+        urls = repo.get_contents(INPUT_FILE, ref=BRANCH).decoded_content.decode("utf-8").splitlines()
     except: return
 
-    m3u_content = "#EXTM3U\n"
-    total = 0
-    # Clean up and deduplicate IDs to avoid double-checking
-    processed_vids = set()
+    m3u = "#EXTM3U\n"
+    count = 0
+    seen_ids = set()
 
-    for url in [u.strip() for u in raw_urls if u.strip()]:
-        print(f"Checking: {url}")
-        vids = get_channel_videos(url)
-        for vid in vids:
-            if vid['id'] in processed_vids: continue
-            
-            status, link, channel, title = get_smart_link(vid['id'])
+    for url in [u.strip() for u in urls if u.strip()]:
+        print(f"Scanning: {url}")
+        video_ids = get_channel_live_vids(url)
+        for v_id in video_ids:
+            if v_id in seen_ids: continue
+            status, link, channel, title = get_live_link(v_id)
             if link:
                 clean_ch = str(channel).replace(",", " ")
-                m3u_content += f'#EXTINF:-1 group-title="{clean_ch}", {clean_ch} | {title}\n{link}\n'
-                total += 1
-                processed_vids.add(vid['id'])
-                print(f"  [+] Found {status}: {title}")
+                m3u += f'#EXTINF:-1 group-title="{clean_ch}", {clean_ch} | {title}\n{link}\n'
+                count += 1
+                seen_ids.add(v_id)
+                print(f"  [+] Added {status}: {title}")
 
-    if total > 0:
+    if count > 0:
         try:
+            path = OUTPUT_FILE
             try:
-                cur = repo.get_contents(OUTPUT_FILE, ref=BRANCH)
-                repo.update_file(cur.path, "Update Playlist", m3u_content, cur.sha, branch=BRANCH)
+                f = repo.get_contents(path, ref=BRANCH)
+                repo.update_file(f.path, "Update Live Playlist", m3u, f.sha, branch=BRANCH)
             except:
-                repo.create_file(OUTPUT_FILE, "Create Playlist", m3u_content, branch=BRANCH)
-            print(f"SUCCESS: {total} streams found.")
-        except Exception as e:
-            print(f"Upload failed: {e}")
+                repo.create_file(path, "Create Live Playlist", m3u, branch=BRANCH)
+            print(f"Success: {count} streams added.")
+        except Exception as e: print(f"Git Error: {e}")
     else:
-        print("No live streams found. Check if cookies are still valid.")
+        print("No live content found. Verify cookies/channels.")
 
 if __name__ == "__main__":
-    run_update_cycle()
+    run_update()
