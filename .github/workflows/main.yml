@@ -2,8 +2,8 @@ name: Update YouTube Playlist
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour
-  workflow_dispatch: # Allows you to run it manually
+    - cron: '0 * * * *' # Automatically runs every hour
+  workflow_dispatch: # Allows you to click "Run workflow" manually in GitHub Actions tab
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
         run: |
           pip install yt-dlp PyGithub
 
-      - name: Run Script
+      - name: Run Update Script
         env:
-          GH_TOKEN: ${{ secrets.PLAYLIST_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python update_playlist.py
