@@ -1,0 +1,19 @@
+name: Update Playlist (Proxy Mode)
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - run: pip install yt-dlp PyGithub requests
+      - env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: python generator.py
