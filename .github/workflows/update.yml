@@ -1,4 +1,4 @@
-name: Update Playlist (Proxy Mode)
+name: Update Playlist (Bypass Mode)
 
 on:
   schedule:
@@ -13,7 +13,7 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-      - run: pip install yt-dlp PyGithub requests
+      - run: python -m pip install -U pip yt-dlp PyGithub
       - env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: python generator.py
