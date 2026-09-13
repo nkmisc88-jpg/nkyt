@@ -31,24 +31,29 @@ def normalize_url(line: str) -> str:
     return line
 
 
-# Player clients to try, in order. The default "web" client is the one
-# most often hit by YouTube's "Sign in to confirm you're not a bot" check
-# on datacenter IPs (like GitHub Actions runners). The android/tv clients
-# are checked less aggressively and don't need cookies for public streams.
-PLAYER_CLIENTS = ["android", "tv", "ios", "web"]
+# Player clients to try, in order. With cookies present, "web" and "mweb"
+# correctly recognize a logged-in browser session. The device clients
+# (android/tv/ios) expect their own session type and return empty format
+# lists when given browser cookies, so they're only useful as a fallback
+# when no cookies file exists.
+PLAYER_CLIENTS_WITH_COOKIES = ["web", "mweb"]
+PLAYER_CLIENTS_NO_COOKIES = ["android", "tv", "ios", "web"]
 
 
 def get_live_stream(url: str):
     """Returns (title, direct_stream_url) if the channel is live, else None."""
-    for client in PLAYER_CLIENTS:
+    has_cookies = os.path.exists(COOKIES_FILE)
+    clients = PLAYER_CLIENTS_WITH_COOKIES if has_cookies else PLAYER_CLIENTS_NO_COOKIES
+
+    for client in clients:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "format": "best",
+            "format": "best[protocol^=m3u8]/best",
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
-        if os.path.exists(COOKIES_FILE):
+        if has_cookies:
             ydl_opts["cookiefile"] = COOKIES_FILE
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
