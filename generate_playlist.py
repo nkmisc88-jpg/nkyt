@@ -1,101 +1,150 @@
 import subprocess
-import re
+import json
 from pathlib import Path
+
 
 CHANNEL_FILE = "nkyt.txt"
 OUTPUT_FILE = "playlist.m3u"
 
 
-def clean_name(name):
-    name = re.sub(r"^https?://(www\.)?youtube\.com/@", "", name)
-    name = re.sub(r"^https?://(www\.)?youtube\.com/", "", name)
-    return name.strip("/").strip()
+def get_live_video(channel_url):
+    channel_url = channel_url.strip().rstrip("/")
 
+    # Ask yt-dlp for channel information.
+    # We use the channel's /live page.
+    live_url = channel_url + "/live"
 
-def get_live_stream(channel_url):
-    live_url = channel_url.rstrip("/") + "/live"
-
-    cmd = [
+    command = [
         "yt-dlp",
+        "--dump-single-json",
+        "--skip-download",
         "--no-warnings",
-        "--quiet",
         "--no-playlist",
-        "--get-title",
-        "--get-url",
-        "-f",
-        "best[protocol^=m3u8]/best",
         live_url,
     ]
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
 
-        if result.returncode != 0:
-            return None
-
-        lines = [
-            line.strip()
-            for line in result.stdout.splitlines()
-            if line.strip()
-        ]
-
-        if len(lines) < 2:
-            return None
-
-        title = lines[0]
-        stream_url = lines[-1]
-
-        # Make sure yt-dlp actually returned a stream URL
-        if not stream_url.startswith(("http://", "https://")):
-            return None
-
-        return title, stream_url
-
-    except Exception as e:
-        print(f"Error: {e}")
+    # IMPORTANT:
+    # Show the actual error instead of calling it "Not live".
+    if result.returncode != 0:
+        print("yt-dlp ERROR:")
+        print(result.stderr)
         return None
+
+    try:
+        info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        print("Could not read yt-dlp JSON output:")
+        print(result.stdout)
+        return None
+
+    live_status = info.get("live_status")
+
+    print("Live status:", live_status)
+    print("Title:", info.get("title"))
+
+    if live_status != "is_live":
+        return None
+
+    video_id = info.get("id")
+    title = info.get("title", "LIVE")
+
+    if not video_id:
+        return None
+
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # Now extract the actual HLS URL.
+    command = [
+        "yt-dlp",
+        "--dump-single-json",
+        "--skip-download",
+        "--no-warnings",
+        "-f",
+        "best[protocol=m3u8]/best",
+        video_url,
+    ]
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+    if result.returncode != 0:
+        print("Stream extraction ERROR:")
+        print(result.stderr)
+        return None
+
+    try:
+        stream_info = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        print("Could not parse stream information")
+        return None
+
+    stream_url = stream_info.get("url")
+
+    if not stream_url:
+        print("No stream URL found")
+        return None
+
+    return title, stream_url
 
 
 def main():
+
     channels = Path(CHANNEL_FILE).read_text(
         encoding="utf-8"
     ).splitlines()
 
     playlist = [
         "#EXTM3U",
-        "# Generated automatically using yt-dlp",
         ""
     ]
 
     live_count = 0
 
     for channel in channels:
+
         channel = channel.strip()
 
         if not channel or channel.startswith("#"):
             continue
 
-        print(f"Checking: {channel}")
+        print()
+        print("=" * 60)
+        print("Checking:", channel)
 
-        result = get_live_stream(channel)
+        result = get_live_video(channel)
 
-        if not result:
-            print("  Not live")
+        if result is None:
+            print("Result: NOT LIVE / EXTRACTION FAILED")
             continue
 
         title, stream_url = result
-        channel_name = clean_name(channel)
 
-        print(f"  LIVE: {title}")
+        channel_name = (
+            channel
+            .replace("https://www.youtube.com/@", "")
+            .replace("http://www.youtube.com/@", "")
+            .replace("www.youtube.com/@", "")
+            .strip("/")
+        )
+
+        print("RESULT: LIVE")
+        print("Title:", title)
 
         playlist.append(
-            f'#EXTINF:-1 tvg-name="{channel_name}",{channel_name} - {title}'
+            f'#EXTINF:-1 tvg-name="{channel_name}",{channel_name}'
         )
+
         playlist.append(stream_url)
         playlist.append("")
 
@@ -106,8 +155,10 @@ def main():
         encoding="utf-8"
     )
 
-    print(f"\nCreated {OUTPUT_FILE}")
-    print(f"Live channels found: {live_count}")
+    print()
+    print("=" * 60)
+    print("Created:", OUTPUT_FILE)
+    print("Live channels found:", live_count)
 
 
 if __name__ == "__main__":
