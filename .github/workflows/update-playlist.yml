@@ -1,0 +1,52 @@
+name: Update YouTube Live Playlist
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "*/15 * * * *"
+
+  push:
+    paths:
+      - "nkyt.txt"
+      - "generate_playlist.py"
+      - ".github/workflows/update-playlist.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  update-playlist:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install yt-dlp
+        run: |
+          python -m pip install --upgrade pip
+          pip install -U yt-dlp
+
+      - name: Generate M3U playlist
+        run: |
+          python generate_playlist.py
+
+      - name: Commit playlist
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add playlist.m3u
+
+          if git diff --cached --quiet; then
+            echo "No playlist changes"
+          else
+            git commit -m "Update live playlist"
+            git push
+          fi
