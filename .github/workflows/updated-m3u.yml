@@ -3,8 +3,8 @@ name: Update M3U Playlist
 on:
   schedule:
     # Runs every 3 hours (adjust as needed)
-    - cron: "0 */3 * * *"
-  workflow_dispatch: {}
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,10 +19,14 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Start POT Provider Server
+        # This spins up the background server required by bgutil-ytdlp-pot-provider
+        run: docker run --name bgutil-provider -d -p 4416:4416 brainicism/bgutil-ytdlp-pot-provider
 
       - name: Write cookies file
         env:
