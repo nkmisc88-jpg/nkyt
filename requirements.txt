@@ -1,1 +1,2 @@
 yt-dlp @ git+https://github.com/yt-dlp/yt-dlp.git
+bgutil-ytdlp-pot-provider
