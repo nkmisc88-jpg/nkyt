@@ -24,8 +24,17 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Write cookies file
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: echo "$YT_COOKIES" > cookies.txt
+
       - name: Generate playlist
         run: python generate_playlist.py
+
+      - name: Remove cookies file
+        if: always()
+        run: rm -f cookies.txt
 
       - name: Commit and push if changed
         run: |
