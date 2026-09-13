@@ -51,12 +51,7 @@ def get_live_stream(url: str):
             "no_warnings": True,
             "skip_download": True,
             "format": "best[protocol^=m3u8]/best",
-            "extractor_args": {
-                "youtube": {
-                    "player_client": [client],
-                    "formats": ["missing_pot"],
-                }
-            },
+            "extractor_args": {"youtube": {"player_client": [client]}},
         }
         if has_cookies:
             ydl_opts["cookiefile"] = COOKIES_FILE
