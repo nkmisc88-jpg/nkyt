@@ -13,7 +13,7 @@ Actions workflow).
 
 import yt_dlp
 
-CHANNELS_FILE = "nkyt.txt"
+CHANNELS_FILE = "channels.txt"
 OUTPUT_FILE = "playlist.m3u"
 
 
@@ -29,21 +29,34 @@ def normalize_url(line: str) -> str:
     return line
 
 
+# Player clients to try, in order. The default "web" client is the one
+# most often hit by YouTube's "Sign in to confirm you're not a bot" check
+# on datacenter IPs (like GitHub Actions runners). The android/tv clients
+# are checked less aggressively and don't need cookies for public streams.
+PLAYER_CLIENTS = ["android", "tv", "ios", "web"]
+
+
 def get_live_stream(url: str):
     """Returns (title, direct_stream_url) if the channel is live, else None."""
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "format": "best",
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if info.get("is_live"):
-                return info.get("title", "Live Stream"), info.get("url")
-    except Exception as e:
-        print(f"  -> Skipped ({e})")
+    for client in PLAYER_CLIENTS:
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "format": "best",
+            "extractor_args": {"youtube": {"player_client": [client]}},
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info.get("is_live") and info.get("url"):
+                    return info.get("title", "Live Stream"), info.get("url")
+                elif not info.get("is_live"):
+                    # Genuinely not live - no point trying other clients
+                    return None
+        except Exception as e:
+            print(f"  -> client={client} failed ({e})")
+            continue
     return None
 
 
