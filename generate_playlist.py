@@ -13,7 +13,7 @@ Actions workflow).
 
 import yt_dlp
 
-CHANNELS_FILE = "channels.txt"
+CHANNELS_FILE = "nkyt.txt"
 OUTPUT_FILE = "playlist.m3u"
 
 
