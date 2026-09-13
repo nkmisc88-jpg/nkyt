@@ -11,10 +11,12 @@ script is meant to be re-run periodically (see the included GitHub
 Actions workflow).
 """
 
+import os
 import yt_dlp
 
 CHANNELS_FILE = "channels.txt"
 OUTPUT_FILE = "playlist.m3u"
+COOKIES_FILE = "cookies.txt"  # optional; only used if the file exists
 
 
 def normalize_url(line: str) -> str:
@@ -46,6 +48,8 @@ def get_live_stream(url: str):
             "format": "best",
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
+        if os.path.exists(COOKIES_FILE):
+            ydl_opts["cookiefile"] = COOKIES_FILE
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
