@@ -30,14 +30,6 @@ def normalize_url(line: str) -> str:
     return line
 
 
-# With cookies present, "web" and "mweb" correctly recognize a logged-in
-# browser session. The device clients (android/tv/ios) expect their own
-# session type and misbehave when given browser cookies, so they're only
-# used as a fallback when no cookies file exists.
-PLAYER_CLIENTS_WITH_COOKIES = ["web", "mweb"]
-PLAYER_CLIENTS_NO_COOKIES = ["android", "tv", "ios", "web"]
-
-
 def pick_stream_url(formats):
     """Prefer an HLS (m3u8) format since that's playable in most IPTV apps."""
     m3u8_formats = [f for f in formats if (f.get("protocol") or "").startswith("m3u8")]
@@ -52,9 +44,19 @@ def get_live_stream(url: str):
     """Returns (title, direct_stream_url) if the channel is genuinely
     broadcasting live, else None. Prints diagnostics along the way."""
     has_cookies = os.path.exists(COOKIES_FILE)
-    clients = PLAYER_CLIENTS_WITH_COOKIES if has_cookies else PLAYER_CLIENTS_NO_COOKIES
 
-    for client in clients:
+    # android_vr is tried FIRST, without cookies. Per yt-dlp's own PO Token
+    # guide, HLS live streams don't require a PO token at all (except via
+    # the ios client), and android_vr specifically doesn't need one either.
+    # It's also cookie-incompatible, so we deliberately don't attach the
+    # cookies file for this attempt.
+    attempts = [("android_vr", False)]
+    if has_cookies:
+        attempts += [("web", True), ("mweb", True)]
+    else:
+        attempts += [("android", False), ("tv", False), ("ios", False), ("web", False)]
+
+    for client, use_cookies in attempts:
         ydl_opts = {
             "quiet": True,
             "no_warnings": True,
@@ -62,7 +64,7 @@ def get_live_stream(url: str):
             "ignore_no_formats_error": True,
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
-        if has_cookies:
+        if use_cookies:
             ydl_opts["cookiefile"] = COOKIES_FILE
 
         try:
