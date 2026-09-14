@@ -25,24 +25,32 @@ def normalize_url(line: str) -> str:
         return ""
     if not line.startswith("http"):
         line = "https://" + line
-    # Append /live if not already present, so yt-dlp checks the live tab
     if not line.rstrip("/").endswith("/live"):
         line = line.rstrip("/") + "/live"
     return line
 
 
-# Player clients to try, in order. With cookies present, "web" and "mweb"
-# correctly recognize a logged-in browser session. The device clients
-# (android/tv/ios) expect their own session type and return empty format
-# lists when given browser cookies, so they're only useful as a fallback
-# when no cookies file exists.
+# With cookies present, "web" and "mweb" correctly recognize a logged-in
+# browser session. The device clients (android/tv/ios) expect their own
+# session type and misbehave when given browser cookies, so they're only
+# used as a fallback when no cookies file exists.
 PLAYER_CLIENTS_WITH_COOKIES = ["web", "mweb"]
 PLAYER_CLIENTS_NO_COOKIES = ["android", "tv", "ios", "web"]
 
 
+def pick_stream_url(formats):
+    """Prefer an HLS (m3u8) format since that's playable in most IPTV apps."""
+    m3u8_formats = [f for f in formats if (f.get("protocol") or "").startswith("m3u8")]
+    candidates = m3u8_formats or formats
+    if not candidates:
+        return None
+    # Formats are usually ordered worst->best; take the last (highest quality)
+    return candidates[-1].get("url")
+
+
 def get_live_stream(url: str):
     """Returns (title, direct_stream_url) if the channel is genuinely
-    broadcasting live, else None."""
+    broadcasting live, else None. Prints diagnostics along the way."""
     has_cookies = os.path.exists(COOKIES_FILE)
     clients = PLAYER_CLIENTS_WITH_COOKIES if has_cookies else PLAYER_CLIENTS_NO_COOKIES
 
@@ -51,34 +59,53 @@ def get_live_stream(url: str):
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            "format": "best[protocol^=m3u8]/best",
+            # Deliberately NOT setting "format" here - forcing a format
+            # selector makes yt-dlp raise an exception (instead of just
+            # returning info) when no formats match, which hides the
+            # live_status/formats diagnostics we need below.
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
         if has_cookies:
             ydl_opts["cookiefile"] = COOKIES_FILE
+
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-                status = info.get("live_status")
-                n_formats = len(info.get("formats") or [])
-                print(
-                    f"  -> client={client}: live_status={status}, "
-                    f"is_live={info.get('is_live')}, formats_found={n_formats}"
-                )
-                if status == "is_upcoming":
-                    print("  -> This is a scheduled/waiting-room stream, not actually live yet.")
-                    return None
-                if info.get("is_live") and info.get("url"):
-                    return info.get("title", "Live Stream"), info.get("url")
-                elif not info.get("is_live"):
-                    return None
         except Exception as e:
-            print(f"  -> client={client} failed ({e})")
+            print(f"  -> client={client}: extraction raised an error: {e}")
             continue
+
+        status = info.get("live_status")
+        formats = info.get("formats") or []
+        print(
+            f"  -> client={client}: live_status={status}, "
+            f"is_live={info.get('is_live')}, formats_found={len(formats)}"
+        )
+
+        if status == "is_upcoming":
+            print("  -> Scheduled/waiting-room stream - not actually broadcasting yet.")
+            return None
+
+        if status not in ("is_live", "was_live", "post_live") and not info.get("is_live"):
+            return None
+
+        if formats:
+            stream_url = pick_stream_url(formats)
+            if stream_url:
+                return info.get("title", "Live Stream"), stream_url
+            print("  -> Formats existed but none had a usable URL, trying next client")
+        else:
+            print("  -> live_status says live/broadcasting but 0 formats returned - "
+                  "extraction is being blocked, not a scheduling issue")
+        # keep trying remaining clients
+
     return None
 
 
 def main():
+    print(f"yt-dlp version: {yt_dlp.version.__version__}")
+    print(f"Cookies file present: {os.path.exists(COOKIES_FILE)}")
+
     with open(CHANNELS_FILE, "r") as f:
         raw_lines = f.readlines()
 
