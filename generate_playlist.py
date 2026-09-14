@@ -40,21 +40,56 @@ def pick_stream_url(formats):
     return candidates[-1].get("url")
 
 
-def get_live_stream(url: str):
-    """Returns (title, direct_stream_url) if the channel is genuinely
-    broadcasting live, else None. Prints diagnostics along the way."""
-    has_cookies = os.path.exists(COOKIES_FILE)
+def resolve_live_video(channel_live_url: str, has_cookies: bool):
+    """Step 1: resolve a channel's /live URL to (video_id, title, formats).
 
-    # android_vr is tried FIRST, without cookies. Per yt-dlp's own PO Token
-    # guide, HLS live streams don't require a PO token at all (except via
-    # the ios client), and android_vr specifically doesn't need one either.
-    # It's also cookie-incompatible, so we deliberately don't attach the
-    # cookies file for this attempt.
+    This uses the cookie-authenticated "web" client, which reliably
+    resolves the channel-tab redirect even though it may not always
+    return usable formats (that's step 2's job). Returns None if the
+    channel is confirmed not live or only has an upcoming/scheduled
+    stream.
+    """
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "ignore_no_formats_error": True,
+        "extractor_args": {"youtube": {"player_client": ["web"]}},
+    }
+    if has_cookies:
+        ydl_opts["cookiefile"] = COOKIES_FILE
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_live_url, download=False)
+    except Exception as e:
+        print(f"  -> resolve: {e}")
+        return None
+
+    status = info.get("live_status")
+    print(f"  -> resolve: live_status={status}, is_live={info.get('is_live')}, id={info.get('id')}")
+
+    if status == "is_upcoming":
+        print("  -> Scheduled/waiting-room stream - not actually broadcasting yet.")
+        return None
+    if status not in ("is_live", "was_live", "post_live") and not info.get("is_live"):
+        return None
+
+    return info.get("id"), info.get("title", "Live Stream"), info.get("formats") or []
+
+
+def get_formats_for_video(video_id: str, has_cookies: bool):
+    """Step 2: given a known-live video ID, try to get real playable
+    formats. android_vr is tried first since it doesn't require a PO
+    token (per yt-dlp's PO Token guide) and works directly on a video
+    URL, unlike on a channel's /live tab."""
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
     attempts = [("android_vr", False)]
     if has_cookies:
         attempts += [("web", True), ("mweb", True)]
     else:
-        attempts += [("android", False), ("tv", False), ("ios", False), ("web", False)]
+        attempts += [("android", False), ("tv", False), ("ios", False)]
 
     for client, use_cookies in attempts:
         ydl_opts = {
@@ -69,34 +104,40 @@ def get_live_stream(url: str):
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(video_url, download=False)
         except Exception as e:
-            print(f"  -> client={client}: extraction raised an error: {e}")
+            print(f"  -> client={client} (video-level): extraction raised an error: {e}")
             continue
 
-        status = info.get("live_status")
         formats = info.get("formats") or []
-        print(
-            f"  -> client={client}: live_status={status}, "
-            f"is_live={info.get('is_live')}, formats_found={len(formats)}"
-        )
+        print(f"  -> client={client} (video-level): formats_found={len(formats)}")
+        stream_url = pick_stream_url(formats)
+        if stream_url:
+            return info.get("title"), stream_url
 
-        if status == "is_upcoming":
-            print("  -> Scheduled/waiting-room stream - not actually broadcasting yet.")
-            return None
+    return None
 
-        if status not in ("is_live", "was_live", "post_live") and not info.get("is_live"):
-            return None
 
-        if formats:
-            stream_url = pick_stream_url(formats)
-            if stream_url:
-                return info.get("title", "Live Stream"), stream_url
-            print("  -> Formats existed but none had a usable URL, trying next client")
-        else:
-            print("  -> live_status says live/broadcasting but 0 formats returned - "
-                  "extraction is being blocked, not a scheduling issue")
-        # keep trying remaining clients
+def get_live_stream(url: str):
+    """Returns (title, direct_stream_url) if the channel is genuinely
+    broadcasting live, else None."""
+    has_cookies = os.path.exists(COOKIES_FILE)
+
+    resolved = resolve_live_video(url, has_cookies)
+    if not resolved:
+        return None
+    video_id, title, formats = resolved
+
+    # The resolve step might already have usable formats - check before
+    # doing a second round of extraction.
+    stream_url = pick_stream_url(formats)
+    if stream_url:
+        return title, stream_url
+
+    result = get_formats_for_video(video_id, has_cookies)
+    if result:
+        found_title, stream_url = result
+        return found_title or title, stream_url
 
     return None
 
