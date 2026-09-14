@@ -54,6 +54,8 @@ def resolve_live_video(channel_live_url: str, has_cookies: bool):
         "no_warnings": True,
         "skip_download": True,
         "ignore_no_formats_error": True,
+        "geo_bypass": True,
+        "geo_bypass_country": "IN",
         "extractor_args": {"youtube": {"player_client": ["web"]}},
     }
     if has_cookies:
@@ -97,6 +99,8 @@ def get_formats_for_video(video_id: str, has_cookies: bool):
             "no_warnings": True,
             "skip_download": True,
             "ignore_no_formats_error": True,
+            "geo_bypass": True,
+            "geo_bypass_country": "IN",
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
         if use_cookies:
@@ -145,6 +149,7 @@ def get_live_stream(url: str):
 def main():
     print(f"yt-dlp version: {yt_dlp.version.__version__}")
     print(f"Cookies file present: {os.path.exists(COOKIES_FILE)}")
+    print("Geo-bypass country: IN (testing whether streams are India-restricted)")
 
     with open(CHANNELS_FILE, "r") as f:
         raw_lines = f.readlines()
