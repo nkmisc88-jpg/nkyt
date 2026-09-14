@@ -59,10 +59,7 @@ def get_live_stream(url: str):
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
-            # Deliberately NOT setting "format" here - forcing a format
-            # selector makes yt-dlp raise an exception (instead of just
-            # returning info) when no formats match, which hides the
-            # live_status/formats diagnostics we need below.
+            "ignore_no_formats_error": True,
             "extractor_args": {"youtube": {"player_client": [client]}},
         }
         if has_cookies:
