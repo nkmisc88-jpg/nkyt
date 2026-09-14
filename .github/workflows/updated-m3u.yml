@@ -1,4 +1,3 @@
-
 name: Update M3U Playlist
 
 on:
@@ -13,6 +12,11 @@ permissions:
 jobs:
   update-playlist:
     runs-on: ubuntu-latest
+    services:
+      bgutil-provider:
+        image: brainicism/bgutil-ytdlp-pot-provider
+        ports:
+          - 4416:4416
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -29,6 +33,15 @@ jobs:
         env:
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: echo "$YT_COOKIES" > cookies.txt
+
+      - name: Debug - verbose yt-dlp run on one channel
+        run: |
+          yt-dlp -v --skip-download --simulate \
+            --extractor-args "youtube:player_client=web" \
+            --cookies cookies.txt \
+            "https://www.youtube.com/@sunnewstamil/live" 2>&1 | tee debug_output.txt || true
+          echo "----- Filtered for POT/plugin lines -----"
+          grep -i -E "plugin|pot|bgutil|token" debug_output.txt || echo "No matching lines found"
 
       - name: Generate playlist
         run: python generate_playlist.py
