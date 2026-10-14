@@ -1,20 +1,24 @@
 import os
+import re
 import subprocess
 
 INPUT_FILES = ["channels.txt", "nkyt.txt"]
 OUTPUT_FILE = "playlist.m3u"
 
 def get_cookie_file():
-    # Uses cookies.txt created by GitHub Secrets if available
     if os.path.exists("cookies.txt") and os.path.getsize("cookies.txt") > 0:
         return "cookies.txt"
+    if os.path.exists("nkyt.txt"):
+        with open("nkyt.txt", "r", encoding="utf-8", errors="ignore") as f:
+            head = f.read(400)
+            if "Netscape" in head or "TRUE\t" in head or "FALSE\t" in head:
+                return "nkyt.txt"
     return None
 
 def is_youtube_url(url):
     return "youtube.com/" in url or "youtu.be/" in url
 
 def extract_hls(url, cookie_file=None):
-    # If it's already a direct m3u8 or non-YouTube IPTV stream, keep it as-is
     if not is_youtube_url(url):
         return url
 
@@ -45,57 +49,92 @@ def extract_hls(url, cookie_file=None):
 def parse_file(filepath):
     channels = []
     if not os.path.exists(filepath):
+        print(f"File not found: {filepath}")
         return channels
 
     with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
         raw_lines = [line.strip() for line in f if line.strip()]
 
-    # Skip file if it happens to be a Netscape cookie file instead of channels
-    if raw_lines and ("Netscape" in raw_lines[0] or ".youtube.com" in raw_lines[0]):
+    if not raw_lines:
+        print(f"{filepath} is empty!")
         return channels
 
-    i = 0
-    while i < len(raw_lines):
-        line = raw_lines[i]
+    # Skip if it's strictly a Netscape cookie file (contains tab-separated cookie rows)
+    if "Netscape" in raw_lines[0] or any("\tTRUE\t" in l or "\tFALSE\t" in l for l in raw_lines[:10]):
+        print(f"Skipping {filepath} (detected as a Netscape cookie file)")
+        return channels
 
-        # 1. Standard M3U format (#EXTINF followed by URL)
-        if line.startswith("#EXTINF"):
-            extinf = line
-            url = raw_lines[i + 1] if (i + 1) < len(raw_lines) else ""
-            if url.startswith("http"):
-                name = extinf.split(",")[-1].strip()
-                channels.append({"extinf": extinf, "url": url, "name": name})
-                i += 2
-                continue
+    print(f"--- Debug: First 3 lines of {filepath} ---")
+    for sample in raw_lines[:3]:
+        print(f"  {sample[:100]}")
+    print("-----------------------------------------")
 
-        # Ignore other comment lines
-        if line.startswith("#") or line.startswith("//"):
-            i += 1
+    url_pattern = re.compile(r'(https?://[^\s|,"\'<>]+)')
+
+    pending_name = "YouTube Live"
+    pending_group = "YouTube"
+    pending_logo = ""
+    pending_extinf = None
+
+    for line in raw_lines:
+        if line.startswith("~~") or line.startswith("#EXTM3U"):
             continue
 
-        # 2. Pipe (|) or Comma (,) separated format
-        if "|" in line or ("," in line and "http" in line):
-            sep = "|" if "|" in line else ","
-            parts = [p.strip() for p in line.split(sep)]
-            # Find which part has the URL
-            url_idx = next((idx for idx, p in enumerate(parts) if p.startswith("http")), None)
-            if url_idx is not None:
-                url = parts[url_idx]
-                name = parts[0] if url_idx > 0 else "Live Channel"
-                group = parts[1] if url_idx > 1 else "YouTube Live"
-                logo = parts[3] if len(parts) > 3 and not parts[3].startswith("http") else ""
-                extinf = f'#EXTINF:-1 tvg-logo="{logo}" group-title="{group}",{name}'
-                channels.append({"extinf": extinf, "url": url, "name": name})
-                i += 1
-                continue
+        # Case 1: #EXTINF line
+        if line.startswith("#EXTINF"):
+            pending_extinf = line
+            pending_name = line.split(",")[-1].strip() if "," in line else "YouTube Live"
+            continue
 
-        # 3. Plain URL on a line
-        if line.startswith("http"):
-            name = line.split("@")[-1].split("/")[0] if "@" in line else "YouTube Channel"
-            extinf = f'#EXTINF:-1 group-title="YouTube Live",{name}'
-            channels.append({"extinf": extinf, "url": line, "name": name})
+        # Search for a URL anywhere on the current line
+        url_match = url_pattern.search(line)
 
-        i += 1
+        if url_match:
+            url = url_match.group(1).strip()
+
+            # Check if the same line also has pipe/comma metadata before the URL
+            if not pending_extinf and ("|" in line or "," in line):
+                sep = "|" if "|" in line else ","
+                parts = [p.strip() for p in line.split(sep) if p.strip() != url]
+                if len(parts) >= 1 and not parts[0].startswith("http"):
+                    pending_name = parts[0]
+                if len(parts) >= 2 and not parts[1].startswith("http"):
+                    pending_group = parts[1]
+                if len(parts) >= 3 and parts[2].startswith("http"):
+                    pending_logo = parts[2]
+
+            if pending_extinf:
+                extinf = pending_extinf
+            else:
+                if pending_name == "YouTube Live" and "@" in url:
+                    pending_name = url.split("@")[-1].split("/")[0]
+                extinf = f'#EXTINF:-1 tvg-logo="{pending_logo}" group-title="{pending_group}",{pending_name}'
+
+            channels.append({
+                "name": pending_name,
+                "url": url,
+                "extinf": extinf
+            })
+
+            # Reset pending metadata for next channel
+            pending_name = "YouTube Live"
+            pending_group = "YouTube"
+            pending_logo = ""
+            pending_extinf = None
+
+        else:
+            # No URL on this line -> Check if it's metadata for the NEXT line (e.g., Name | Group | Logo | tvg-id)
+            if not line.startswith("#") and ("|" in line or "," in line):
+                sep = "|" if "|" in line else ","
+                parts = [p.strip() for p in line.split(sep)]
+                if len(parts) >= 1 and parts[0]:
+                    pending_name = parts[0]
+                if len(parts) >= 2 and parts[1]:
+                    pending_group = parts[1]
+                if len(parts) >= 3 and parts[2]:
+                    pending_logo = parts[2]
+            elif not line.startswith("#") and len(line) < 60:
+                pending_name = line
 
     return channels
 
@@ -104,7 +143,7 @@ def main():
     if cookie_file:
         print(f"Using cookies from: {cookie_file}")
     else:
-        print("Running with POT Token Provider (no cookies.txt found)")
+        print("Running with POT Token Provider only")
 
     all_channels = []
     seen_urls = set()
